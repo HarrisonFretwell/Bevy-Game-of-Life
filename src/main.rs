@@ -1,4 +1,4 @@
-use bevy::{core::FixedTimestep, prelude::*, utils::HashMap};
+use bevy::{core::FixedTimestep, ecs::schedule::ShouldRun, prelude::*, utils::HashMap};
 
 const ARENA_WIDTH: i32 = 16;
 const ARENA_HEIGHT: i32 = 16;
@@ -16,6 +16,15 @@ struct CellState {
     will_be_alive: bool,
 }
 
+#[derive(Debug, PartialEq)]
+enum RunState {
+    Paused,
+    Running,
+}
+
+#[derive(Debug, PartialEq)]
+struct AppState(RunState);
+
 fn main() {
     App::new()
         .insert_resource(WindowDescriptor {
@@ -24,8 +33,10 @@ fn main() {
             height: 1000.,
             ..Default::default()
         })
-        .add_startup_system(setup_camera)
+        .add_startup_system(setup)
         .add_startup_system(startup_spawn)
+        .insert_resource(AppState(RunState::Paused))
+        .add_system(user_input)
         .add_system_set_to_stage(
             CoreStage::PostUpdate,
             SystemSet::new()
@@ -35,11 +46,12 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_system_set(
             SystemSet::new()
-                .with_run_criteria(FixedTimestep::step(0.3))
-                .with_system(update_cells),
+                .with_system(update_cells)
+                .with_run_criteria(FixedTimestep::step(0.3)),
         )
         .run();
 }
+
 fn startup_spawn(mut commands: Commands) {
     for x in 0..ARENA_WIDTH {
         for y in 0..ARENA_HEIGHT {
@@ -48,8 +60,18 @@ fn startup_spawn(mut commands: Commands) {
     }
 }
 
-fn setup_camera(mut commands: Commands) {
+fn setup(mut commands: Commands) {
     commands.spawn_bundle(OrthographicCameraBundle::new_2d());
+}
+
+fn user_input(keyboard_input: Res<Input<KeyCode>>, mut app_state: ResMut<AppState>) {
+    if keyboard_input.just_pressed(KeyCode::Space) {
+        if (*app_state).0 == RunState::Paused {
+            (*app_state).0 = RunState::Running;
+        } else {
+            (*app_state).0 = RunState::Paused;
+        }
+    }
 }
 
 fn spawn_tile(commands: &mut Commands, x: i32, y: i32, alive: bool) -> Entity {
@@ -88,7 +110,10 @@ fn number_of_alive_neighbours(hash_map: &HashMap<Position, CellState>, position:
     count
 }
 
-fn update_cells(mut q: Query<(&mut CellState, &Position, &mut Sprite)>) {
+fn update_cells(mut q: Query<(&mut CellState, &Position, &mut Sprite)>, app_state: Res<AppState>) {
+    if (*app_state).0 == RunState::Paused {
+        return;
+    }
     let mut cell_map: HashMap<Position, CellState> = HashMap::default();
     q.iter().for_each(|(cell_state, position, _sprite)| {
         cell_map.insert(*position, *cell_state);

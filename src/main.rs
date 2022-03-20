@@ -1,17 +1,19 @@
 use bevy::{core::FixedTimestep, prelude::*, utils::HashMap};
 
-const ARENA_WIDTH: i32 = 32;
-const ARENA_HEIGHT: i32 = 32;
+const ARENA_WIDTH: i32 = 16;
+const ARENA_HEIGHT: i32 = 16;
 const ALIVE_COLOUR: Color = Color::rgb(0.75, 0.85, 0.5);
 const DEAD_COLOUR: Color = Color::rgb(0.3, 0.3, 0.3);
-#[derive(Component, Clone, Copy, PartialEq, Eq, std::hash::Hash)]
+const BORDER_SIZE: f32 = 25.0;
+#[derive(Component, Clone, Copy, PartialEq, Eq, std::hash::Hash, Debug)]
 struct Position {
     x: i32,
     y: i32,
 }
-#[derive(Component, Clone, Copy, PartialEq, Eq, std::hash::Hash)]
+#[derive(Component, Clone, Copy, PartialEq, Eq, std::hash::Hash, Debug)]
 struct CellState {
-    alive: bool,
+    is_currently_alive: bool,
+    will_be_alive: bool,
 }
 
 fn main() {
@@ -33,7 +35,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_system_set(
             SystemSet::new()
-                .with_run_criteria(FixedTimestep::step(0.1))
+                .with_run_criteria(FixedTimestep::step(0.3))
                 .with_system(update_cells),
         )
         .run();
@@ -41,7 +43,7 @@ fn main() {
 fn startup_spawn(mut commands: Commands) {
     for x in 0..ARENA_WIDTH {
         for y in 0..ARENA_HEIGHT {
-            spawn_tile(&mut commands, x, y, x == 4 && (y % 3 == 0 || y == 2));
+            spawn_tile(&mut commands, x, y, x == 2);
         }
     }
 }
@@ -60,19 +62,24 @@ fn spawn_tile(commands: &mut Commands, x: i32, y: i32, alive: bool) -> Entity {
             ..Default::default()
         })
         .insert(Position { x, y })
-        .insert(CellState { alive })
+        .insert(CellState {
+            is_currently_alive: alive,
+            will_be_alive: alive,
+        })
         .id()
 }
 fn number_of_alive_neighbours(hash_map: &HashMap<Position, CellState>, position: Position) -> i32 {
     let mut count = 0;
-    for x in position.x - 1..=position.x + 1 {
-        for y in position.y - 1..=position.y + 1 {
+    for x in (position.x - 1)..(position.x + 2) {
+        for y in (position.y - 1)..(position.y + 2) {
             if x == position.x && y == position.y {
-                //Skip self
                 continue;
             }
-            if let Some(cell_state) = hash_map.get(&Position { x, y }) {
-                if cell_state.alive {
+            if !(0..ARENA_WIDTH).contains(&x) || !(0..ARENA_HEIGHT).contains(&y) {
+                continue;
+            }
+            if let Some(cell) = hash_map.get(&Position { x, y }) {
+                if cell.is_currently_alive {
                     count += 1;
                 }
             }
@@ -81,20 +88,26 @@ fn number_of_alive_neighbours(hash_map: &HashMap<Position, CellState>, position:
     count
 }
 
-fn update_cells(mut commands: Commands, mut q: Query<(&mut CellState, &Position, &mut Sprite)>) {
+fn update_cells(mut q: Query<(&mut CellState, &Position, &mut Sprite)>) {
     let mut cell_map: HashMap<Position, CellState> = HashMap::default();
     q.iter().for_each(|(cell_state, position, _sprite)| {
         cell_map.insert(*position, *cell_state);
     });
-    for (mut cell_state, position, mut sprite) in q.iter_mut() {
+    for (mut cell_state, position, _sprite) in q.iter_mut() {
         let alive_neighbours = number_of_alive_neighbours(&cell_map, *position);
         if alive_neighbours == 2 || alive_neighbours == 3 {
-            cell_state.alive = true;
+            cell_state.will_be_alive = true;
+        } else {
+            cell_state.will_be_alive = false;
+        }
+    }
+    for (mut cell_state, _position, mut sprite) in q.iter_mut() {
+        if cell_state.will_be_alive {
             sprite.color = ALIVE_COLOUR;
         } else {
-            cell_state.alive = false;
             sprite.color = DEAD_COLOUR;
         }
+        cell_state.is_currently_alive = cell_state.will_be_alive;
     }
 }
 
@@ -120,12 +133,12 @@ fn position_translation(windows: Res<Windows>, mut q: Query<(&Position, &mut Tra
         t.translation = Vec3::new(
             convert_coords_to_screen_space(
                 pos.x as f32,
-                window.width() as f32,
-                ARENA_HEIGHT as f32,
+                (window.width() - BORDER_SIZE) as f32,
+                ARENA_WIDTH as f32,
             ),
             convert_coords_to_screen_space(
                 pos.y as f32,
-                window.height() as f32,
+                (window.height() - BORDER_SIZE) as f32,
                 ARENA_HEIGHT as f32,
             ),
             0.0,
